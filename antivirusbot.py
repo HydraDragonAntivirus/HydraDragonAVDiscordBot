@@ -195,7 +195,7 @@ def load_domain_list(path):
 
 def load_all_lists():
     s = load_settings()
-    base_path = s.get('base_path', 'C:\\Users\\victim\\Documents\\HydraDragonAntivirus\\hydradragon\\website')
+    base_path = s.get('base_path', 'website')
     
     return {
         # IP lists
