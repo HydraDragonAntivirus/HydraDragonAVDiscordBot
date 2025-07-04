@@ -1,0 +1,15 @@
+{
+    "WhiteListFilesIPv6": "website/IPv6WhiteList.txt",
+    "WhiteListFilesIPv4": "website/IPv4WhiteList.txt",
+    "PhishingFilesIPv6": "",
+    "PhishingFilesIPv4Active": "website/IPv4PhishingActive.txt",
+    "PhishingFilesIPv4InActive": "website/IPv4PhishingInActive.txt",
+    "DDoSFilesIPv6": "website/IPv6DDoS.txt",
+    "DDoSFilesIPv4": "website/IPv4DDoS.txt",
+    "BruteForceFilesIPv6": "",
+    "BruteForceFilesIPv4": "website/IPv4BruteForce.txt",
+    "SpamFilesIPv6": "website/IPv6Spam.txt",
+    "SpamFilesIPv4": "website/IPv4Spam.txt",
+    "MalwareFilesIPv6": "website/IPv6Malware.txt",
+    "MalwareFilesIPv4": "website/IPv4Malware.txt"
+}
