@@ -1,5 +1,6 @@
-
-#!/usr/bin/env python3
+# ---------------------------------
+# IP Extraction & Validation
+# ---------------------------------#!/usr/bin/env python3
 
 import os
 import re
@@ -13,10 +14,49 @@ from bs4 import BeautifulSoup
 import socket
 import tldextract
 import asyncio
+import urllib.request
+from urllib.parse import urlparse
 
 # ---------------------------------
-# IP Extraction & Validation
+# Domain Extraction & Validation
 # ---------------------------------
+
+def extract_domains_from_text(text):
+    """Extract domains and URLs from text"""
+    found_domains = set()
+    found_urls = set()
+    
+    # URL patterns
+    url_pattern = re.compile(
+        r'https?://(?:[-\w.])+(?:\.[a-zA-Z]{2,})+(?:/[^\s]*)?',
+        re.IGNORECASE
+    )
+    
+    # Domain patterns (more flexible)
+    domain_pattern = re.compile(
+        r'\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}\b'
+    )
+    
+    # Find URLs
+    for match in url_pattern.finditer(text):
+        url = match.group(0)
+        found_urls.add(url)
+        # Extract domain from URL
+        try:
+            parsed = urlparse(url)
+            if parsed.netloc:
+                found_domains.add(parsed.netloc.lower())
+        except:
+            continue
+    
+    # Find standalone domains
+    for match in domain_pattern.finditer(text):
+        domain = match.group(0).lower()
+        # Basic validation
+        if '.' in domain and not domain.startswith('.') and not domain.endswith('.'):
+            found_domains.add(domain)
+    
+    return list(found_domains), list(found_urls)
 
 def get_my_public_ip():
     """Get the bot's public IP address"""
@@ -50,6 +90,16 @@ def should_exclude_ip(ip_string):
     # Exclude your own IP
     if my_ip and ip_string == my_ip:
         return True
+    
+    # You can also add specific IPs to exclude here
+    excluded_ips = {
+        # Add your known IPs here if needed
+        # '1.2.3.4',
+        # '5.6.7.8',
+    }
+    
+    return ip_string in excluded_ips
+
 
 def extract_ip_and_port(text):
     found = []
@@ -123,9 +173,32 @@ def load_ip_list(path):
         return set()
 
 
+def load_domain_list(path):
+    """Load domains from file, handling different formats"""
+    if not path or not os.path.exists(path):
+        return set()
+    try:
+        with open(path, encoding='utf-8') as f:
+            domains = set()
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#'):
+                    # Handle different formats: domain, domain,description, etc.
+                    domain = line.split(',')[0].split()[0].lower()
+                    if domain and '.' in domain:
+                        domains.add(domain)
+            return domains
+    except Exception as e:
+        print(f"Error loading domain list from {path}: {e}")
+        return set()
+
+
 def load_all_lists():
     s = load_settings()
+    base_path = s.get('base_path', 'C:\\Users\\victim\\Documents\\HydraDragonAntivirus\\hydradragon\\website')
+    
     return {
+        # IP lists
         'whitelist_v4':  load_ip_list(s.get('WhiteListFilesIPv4', '')),
         'whitelist_v6':  load_ip_list(s.get('WhiteListFilesIPv6', '')),
         'phish_act_v4':  load_ip_list(s.get('PhishingFilesIPv4Active', '')),
@@ -137,7 +210,64 @@ def load_all_lists():
         'spam_v6':       load_ip_list(s.get('SpamFilesIPv6', '')),
         'malware_v4':    load_ip_list(s.get('MalwareFilesIPv4', '')),
         'malware_v6':    load_ip_list(s.get('MalwareFilesIPv6', '')),
+        
+        # Domain lists
+        'abuse_domains':     load_domain_list(os.path.join(base_path, 'AbuseDomains.txt')),
+        'abuse_subdomains':  load_domain_list(os.path.join(base_path, 'AbuseSubDomains.txt')),
+        'malware_domains':   load_domain_list(os.path.join(base_path, 'MalwareDomains.txt')),
+        'malware_subdomains': load_domain_list(os.path.join(base_path, 'MalwareSubDomains.txt')),
+        'phishing_domains':  load_domain_list(os.path.join(base_path, 'PhishingDomains.txt')),
+        'phishing_subdomains': load_domain_list(os.path.join(base_path, 'PhishingSubDomains.txt')),
+        'spam_domains':      load_domain_list(os.path.join(base_path, 'SpamDomains.txt')),
+        'spam_subdomains':   load_domain_list(os.path.join(base_path, 'SpamSubDomains.txt')),
+        'mining_domains':    load_domain_list(os.path.join(base_path, 'MiningDomains.txt')),
+        'mining_subdomains': load_domain_list(os.path.join(base_path, 'MiningSubDomains.txt')),
+        'whitelist_domains': load_domain_list(os.path.join(base_path, 'WhiteListDomains.txt')),
+        'whitelist_subdomains': load_domain_list(os.path.join(base_path, 'WhiteListSubDomains.txt')),
     }
+
+
+def categorize_domain(domain, lists=None):
+    """Categorize a domain based on threat intelligence lists"""
+    if lists is None:
+        lists = load_all_lists()
+    
+    domain = domain.lower()
+    
+    # Check whitelist first
+    if domain in lists['whitelist_domains'] or domain in lists['whitelist_subdomains']:
+        return 'whitelist'
+    
+    # Check for threats
+    if domain in lists['malware_domains'] or domain in lists['malware_subdomains']:
+        return 'malware'
+    
+    if domain in lists['phishing_domains'] or domain in lists['phishing_subdomains']:
+        return 'phishing'
+    
+    if domain in lists['spam_domains'] or domain in lists['spam_subdomains']:
+        return 'spam'
+    
+    if domain in lists['abuse_domains'] or domain in lists['abuse_subdomains']:
+        return 'abuse'
+    
+    if domain in lists['mining_domains'] or domain in lists['mining_subdomains']:
+        return 'cryptomining'
+    
+    # Check subdomains against parent domains
+    parts = domain.split('.')
+    for i in range(len(parts)):
+        parent_domain = '.'.join(parts[i:])
+        if parent_domain in lists['malware_domains']:
+            return 'malware (parent)'
+        if parent_domain in lists['phishing_domains']:
+            return 'phishing (parent)'
+        if parent_domain in lists['spam_domains']:
+            return 'spam (parent)'
+        if parent_domain in lists['abuse_domains']:
+            return 'abuse (parent)'
+    
+    return None
 
 
 def categorize_ip(ip, version, lists=None):
@@ -170,7 +300,9 @@ async def heuristic_scan_url(url: str):
         whitelist = lists['whitelist_v4'] | lists['whitelist_v6']
         malicious = lists['phish_act_v4'] | lists['phish_inact_v4']
         found_ips = set()
+        found_domains = set()
         flags = {'whitelisted': [], 'malicious': [], 'unknown': []}
+        domain_results = {'whitelist': [], 'malware': [], 'phishing': [], 'spam': [], 'abuse': [], 'cryptomining': []}
 
         if not url.startswith(('http://','https://')):
             url = 'http://' + url
@@ -196,13 +328,14 @@ async def heuristic_scan_url(url: str):
         td = tldextract.extract(url)
         host = f"{td.subdomain}.{td.domain}.{td.suffix}".strip('.')
         if host and host != '.':
+            found_domains.add(host)
             try:
                 ip = socket.gethostbyname(host)
                 found_ips.add(ip)
             except Exception as e:
                 print(f"Could not resolve {host}: {e}")
 
-        # parse links
+        # parse links and extract more domains
         soup = BeautifulSoup(html, 'html.parser')
         for tag in soup.find_all(['a','script','img','link']):
             src = tag.get('href') or tag.get('src')
@@ -220,13 +353,14 @@ async def heuristic_scan_url(url: str):
             td2 = tldextract.extract(src)
             host2 = f"{td2.subdomain}.{td2.domain}.{td2.suffix}".strip('.')
             if host2 and host2 != '.':
+                found_domains.add(host2)
                 try:
                     ip2 = socket.gethostbyname(host2)
                     found_ips.add(ip2)
                 except Exception:
                     continue
 
-        # classify
+        # classify IPs
         for ip in found_ips:
             if should_exclude_ip(ip):
                 continue  # Skip your own IP
@@ -237,7 +371,21 @@ async def heuristic_scan_url(url: str):
             else:
                 flags['unknown'].append(ip)
         
-        return flags
+        # classify domains
+        for domain in found_domains:
+            category = categorize_domain(domain, lists)
+            if category and category in domain_results:
+                domain_results[category].append(domain)
+            elif category and '(' in category:  # Handle parent domain matches
+                base_cat = category.split('(')[0].strip()
+                if base_cat in domain_results:
+                    domain_results[base_cat].append(f"{domain} (parent)")
+        
+        # Add domain results to the return value
+        result = dict(flags)
+        result['domain_results'] = {k: v for k, v in domain_results.items() if v}
+        
+        return result
     except Exception as e:
         return {'error': f'Unexpected error: {str(e)}'}
 
@@ -254,33 +402,57 @@ async def on_ready():
     print(f'✅ Bot connected as {bot.user} (ID: {bot.user.id})')
     print(f'Bot is in {len(bot.guilds)} guilds')
 
-@bot.command(name='scan', help='Extracts IPs from text and shows their categories')
+@bot.command(name='scan', help='Extracts IPs and domains from text and shows their categories')
 async def scan_command(ctx, *, text: str = None):
-    """Scan text for IPs and categorize them"""
+    """Scan text for IPs and domains, then categorize them"""
     if text is None:
-        await ctx.reply('❌ Please provide text to scan. Usage: `!scan <text with IPs>`')
+        await ctx.reply('❌ Please provide text to scan. Usage: `!scan <text with IPs/domains>`')
         return
     
     try:
-        results = extract_ip_and_port(text)
-        if not results:
-            await ctx.reply('❌ No valid public IPs found in the provided text.')
+        # Extract IPs
+        ip_results = extract_ip_and_port(text)
+        # Extract domains
+        domains, urls = extract_domains_from_text(text)
+        
+        if not ip_results and not domains:
+            await ctx.reply('❌ No valid public IPs or domains found in the provided text.')
             return
         
         lines = []
-        for ip, port, version in results:
-            suffix = f':{port}' if port else ''
-            cat = categorize_ip(ip, version) or '(no category)'
-            lines.append(f'• `{ip}{suffix}` ({version}) → **{cat}**')
         
-        response = '🔍 **IP Scan Results:**\n' + '\n'.join(lines)
+        # Process IPs
+        if ip_results:
+            lines.append('**📍 IP Addresses:**')
+            for ip, port, version in ip_results:
+                suffix = f':{port}' if port else ''
+                cat = categorize_ip(ip, version) or '(no category)'
+                lines.append(f'• `{ip}{suffix}` ({version}) → **{cat}**')
+        
+        # Process domains
+        if domains:
+            lines.append('\n**🌐 Domains:**')
+            for domain in domains[:20]:  # Limit to first 20 domains
+                cat = categorize_domain(domain) or '(no category)'
+                lines.append(f'• `{domain}` → **{cat}**')
+            
+            if len(domains) > 20:
+                lines.append(f'... and {len(domains) - 20} more domains')
+        
+        response = '🔍 **Scan Results:**\n' + '\n'.join(lines)
+        
+        # Split response if too long
+        if len(response) > 1900:
+            response = response[:1900] + '\n... (truncated)'
+        
         await ctx.reply(response)
     except Exception as e:
         await ctx.reply(f'❌ Error during scan: {str(e)}')
 
-@bot.command(name='scanurl', help='Visits a URL, extracts linked IPs, and classifies them')
+
+@bot.command(name='scanurl', help='Visits a URL, extracts linked IPs and domains, and classifies them')
 async def scanurl_command(ctx, url: str = None):
-    """Scan a URL for associated IPs and classify them"""
+    """Scan a URL for associated IPs and domains, then classify them"""
     if url is None:
         await ctx.reply('❌ Please provide a URL to scan. Usage: `!scanurl <URL>`')
         return
@@ -297,6 +469,7 @@ async def scanurl_command(ctx, url: str = None):
         
         response = f"**🔍 URL Scan Results for:** `{url}`\n\n"
         
+        # IP results
         if result['whitelisted']:
             response += f"✅ **Whitelisted IPs:** `{', '.join(result['whitelisted'])}`\n"
         if result['malicious']:
@@ -304,8 +477,22 @@ async def scanurl_command(ctx, url: str = None):
         if result['unknown']:
             response += f"❓ **Unknown IPs:** `{', '.join(result['unknown'])}`\n"
         
-        if not any([result['whitelisted'], result['malicious'], result['unknown']]):
-            response += "ℹ️ No IPs found or resolved from this URL."
+        # Domain results
+        if result.get('domain_results'):
+            for category, domains in result['domain_results'].items():
+                if domains:
+                    emoji = {'whitelist': '✅', 'malware': '🦠', 'phishing': '🎣', 
+                           'spam': '📧', 'abuse': '⚠️', 'cryptomining': '⛏️'}.get(category, '❓')
+                    response += f"{emoji} **{category.title()} Domains:** `{', '.join(domains[:5])}`\n"
+                    if len(domains) > 5:
+                        response += f"   ... and {len(domains) - 5} more\n"
+        
+        if not any([result['whitelisted'], result['malicious'], result['unknown']]) and not result.get('domain_results'):
+            response += "ℹ️ No threats detected from this URL."
+        
+        # Split response if too long
+        if len(response) > 1900:
+            response = response[:1900] + '\n... (truncated)'
         
         await msg.edit(content=response)
     except Exception as e:
@@ -317,9 +504,12 @@ async def on_message(message):
     if message.author.bot:
         return
     
-    # Check if message contains IPs and add reaction
+    # Check if message contains IPs or domains and add reaction
     try:
-        if extract_ip_and_port(message.content):
+        ip_results = extract_ip_and_port(message.content)
+        domains, urls = extract_domains_from_text(message.content)
+        
+        if ip_results or domains:
             await message.add_reaction('🔍')
     except Exception as e:
         print(f"Error adding reaction: {e}")
