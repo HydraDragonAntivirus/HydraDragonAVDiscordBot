@@ -499,25 +499,6 @@ async def scanurl_command(ctx, url: str = None):
         await msg.edit(content=f'❌ Error during URL scan: {str(e)}')
 
 @bot.event
-async def on_message(message):
-    # Ignore bot messages
-    if message.author.bot:
-        return
-    
-    # Check if message contains IPs or domains and add reaction
-    try:
-        ip_results = extract_ip_and_port(message.content)
-        domains, urls = extract_domains_from_text(message.content)
-        
-        if ip_results or domains:
-            await message.add_reaction('🔍')
-    except Exception as e:
-        print(f"Error adding reaction: {e}")
-    
-    # Process commands
-    await bot.process_commands(message)
-
-@bot.event
 async def on_command_error(ctx, error):
     """Handle command errors"""
     if isinstance(error, commands.CommandNotFound):
